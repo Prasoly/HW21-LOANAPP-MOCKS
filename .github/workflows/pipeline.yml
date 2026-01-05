@@ -9,11 +9,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 20
 
@@ -22,8 +20,11 @@ jobs:
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps
-      - name: start react
-        run: npx run start
 
-      - name: Run tests
+      - name: Start React app
+        run: |
+          npm start &
+          npx wait-on http://localhost:3000
+
+      - name: Run Playwright tests
         run: npx playwright test
