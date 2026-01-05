@@ -1,62 +1,134 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, Route } from '@playwright/test';
 
 const serviceURL = 'http://localhost:3000';
 const backendURL = 'http://localhost:8080';
 
 test('main flow', async ({ page }) => {
-  await page.goto(serviceURL);
-  await page.getByTestId('id-small-loan-calculator-field-apply').click();
-  await page.getByTestId('login-popup-username-input').click();
-  await page.getByTestId('login-popup-username-input').fill('usern');
-  await page.getByTestId('login-popup-username-input').press('Tab');
-  await page.getByTestId('login-popup-password-input').fill('pwd');
-  await page.getByTestId('login-popup-continue-button').click();
-  await page.getByTestId('final-page-continue-button').click();
-  await page.getByTestId('final-page-success-ok-button').click();
+    await page.goto(serviceURL);
+
+    await page.getByTestId('id-small-loan-calculator-field-apply').click();
+    await page.getByTestId('login-popup-username-input').fill('usern');
+    await page.getByTestId('login-popup-password-input').fill('pwd');
+    await page.getByTestId('login-popup-continue-button').click();
+
+    await page.getByTestId('final-page-continue-button').click();
+    await page.getByTestId('final-page-success-ok-button').click();
 });
 
-test('redirect flow', async ({ page, request }) => {
-  await page.goto(serviceURL);
-  await page.getByTestId('id-image-element-button-image-1').click();
-  await expect( page.getByTestId('id-small-loan-calculator-field-apply') ).toBeInViewport()
-  await page.getByTestId('id-image-element-button-image-2').click();
-  await expect( page.getByTestId('id-small-loan-calculator-field-apply') ).toBeInViewport()
-})
-
-test('mocked loan calc', async ({ page }) => {
-    await page.route(`**/api/loan-calc*`, async route => {
-        // const url = route.request().url();
-        // const newUrl = url.replace("1000", "1200");
-        // await route.fetch({url: newUrl, method: "POST", postData: {test: "test"}});
-        await route.fulfill({json: {"paymentAmountMonthly":144.33}, status: 200})
-    });
-    await page.route(`${backendURL}/api/loan-calc?amount=500&period=12`, async route => {
-        await route.fulfill({json: {paymentAmountMonthly:200.33}})
-    });
-
-    const firstLoanCalcRequest = page.waitForResponse(`${backendURL}/api/loan-calc*`);
+test('redirect flow', async ({ page }) => {
     await page.goto(serviceURL);
-    await firstLoanCalcRequest;
 
-    const secondLoanCalcRequest = page.waitForResponse(`${backendURL}/api/loan-calc*`);
-    await page.getByTestId("id-small-loan-calculator-field-amount").fill("1000");
-    await secondLoanCalcRequest;
-    const calculationSpan = page.getByTestId("ib-small-loan-calculator-field-monthlyPayment");
-    expect(await calculationSpan.innerText()).not.toHaveLength(0);
-})
+    await page.getByTestId('id-image-element-button-image-1').click();
+    await expect(
+        page.getByTestId('id-small-loan-calculator-field-apply')
+    ).toBeInViewport();
 
-test("negative test (400 status code)", async ({page}) => {
-    await page.route(`**/api/loan-calc*`, async route => {
+    await page.getByTestId('id-image-element-button-image-2').click();
+    await expect(
+        page.getByTestId('id-small-loan-calculator-field-apply')
+    ).toBeInViewport();
+});
+
+test('1.0 - (mock) loan calculation', async ({ page }) => {
+    const data = {
+        default: '42.8',
+        changed: '50',
+    };
+
+    await page.route('**/api/loan-calc?amount=500**', async (route: Route) => {
         await route.fulfill({
-            status: 400
+            status: 200,
+            json: { paymentAmountMonthly: data.default },
         });
     });
 
-    const loanCalcResponse = page.waitForResponse(`**/api/loan-calc*`);
+    await page.route('**/api/loan-calc?amount=1000**', async (route: Route) => {
+        await route.fulfill({
+            status: 200,
+            json: { paymentAmountMonthly: data.changed },
+        });
+    });
+
+    const calculationSpan = page.getByTestId(
+        'ib-small-loan-calculator-field-monthlyPayment'
+    );
+    const amountInput = page.getByTestId(
+        'id-small-loan-calculator-field-amount'
+    );
+
     await page.goto(serviceURL);
-    await loanCalcResponse;
+    await page.waitForResponse(`${backendURL}/api/loan-calc*`);
 
-    const errorSpan = page.getByTestId("id-small-loan-calculator-field-error");
-    await expect(errorSpan).toBeVisible();
-})
+    expect((await calculationSpan.innerText()).split(' ')[0]).toBe(
+        data.default
+    );
 
+    await amountInput.fill('1000');
+    await page.waitForResponse(`${backendURL}/api/loan-calc*`);
+
+    expect(await amountInput.inputValue()).toBe('1000');
+    expect((await calculationSpan.innerText()).split(' ')[0]).toBe(
+        data.changed
+    );
+});
+
+test('1.1 - (mock) negative loan calculation test', async ({ page }) => {
+    await page.route('**/api/loan-calc*', async (route: Route) => {
+        await route.fulfill({ status: 400 });
+    });
+
+    await page.goto(serviceURL);
+    await page.waitForResponse(`${backendURL}/api/loan-calc*`);
+
+    await expect(
+        page.getByTestId('id-small-loan-calculator-field-error')
+    ).toBeVisible();
+});
+
+test('1.2 - (mock) loan calculation with status 500 and no response body', async ({
+                                                                                      page,
+                                                                                  }) => {
+    await page.route('**/api/loan-calc?amount=500**', async (route: Route) => {
+        await route.fulfill({ status: 500 });
+    });
+
+    await page.goto(serviceURL);
+    await page.waitForResponse(`${backendURL}/api/loan-calc*`);
+
+    await expect(
+        page.getByTestId('id-small-loan-calculator-field-error')
+    ).toBeVisible();
+});
+
+test('1.3 - (mock) loan calculation with status 200 and no response body', async ({
+                                                                                      page,
+                                                                                  }) => {
+    await page.route('**/api/loan-calc?amount=500**', async (route: Route) => {
+        await route.fulfill({ status: 200 });
+    });
+
+    await page.goto(serviceURL);
+    await page.waitForResponse(`${backendURL}/api/loan-calc*`);
+
+    await expect(
+        page.getByTestId('ib-small-loan-calculator-field-monthlyPayment')
+    ).toContainText('undefined');
+});
+
+test('1.4 - (mock) loan calculation with wrong response body key', async ({
+                                                                              page,
+                                                                          }) => {
+    await page.route('**/api/loan-calc?amount=500**', async (route: Route) => {
+        await route.fulfill({
+            status: 200,
+            json: { helloThere: '1.11' },
+        });
+    });
+
+    await page.goto(serviceURL);
+    await page.waitForResponse(`${backendURL}/api/loan-calc*`);
+
+    await expect(
+        page.getByTestId('ib-small-loan-calculator-field-monthlyPayment')
+    ).toContainText('undefined');
+});
